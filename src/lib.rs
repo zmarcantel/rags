@@ -135,7 +135,7 @@ impl Parser {
             return Err(Error::InvalidState("call to done() at top-level"));
         }
 
-        if self.commit_depth == self.max_depth {
+        if (self.walk_depth == self.commit_depth) && ( self.commit_depth == self.max_depth) {
             self.parse_done = true;
         }
         self.walk_depth -= 1;
@@ -148,7 +148,7 @@ impl Parser {
             return true;
         }
         if is_subcmd {
-            self.walk_depth != (self.max_depth + 1)
+            self.walk_depth != (self.commit_depth + 1)
         } else {
             self.walk_depth != self.max_depth
         }
@@ -313,7 +313,7 @@ impl Parser {
 
     pub fn arg<T: FromStr+ToString>(mut self,
         short: char, long: &'static str, desc: &'static str,
-        into: &mut T
+        into: &mut T, label: Option<&'static str>
     ) -> Result<Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
@@ -321,7 +321,10 @@ impl Parser {
         if self.should_ignore(false) { return Ok(self); }
 
         // TODO: if self.wants_help()
-        self.printer.add_arg(printer::Argument::new(short, long, desc), self.curr_group)?;
+        self.printer.add_arg(
+            printer::Argument::new(short, long, desc, label, Some(into.to_string())),
+            self.curr_group
+        )?;
 
         let found_opt = self.find_match(short, long, true);
         if found_opt.is_none() { // TODO: required arg flag
@@ -336,19 +339,19 @@ impl Parser {
     }
 
     pub fn short_arg<T: FromStr+ToString>(self,
-        short: char, desc: &'static str, into: &mut T
+        short: char, desc: &'static str, into: &mut T, label: Option<&'static str>
     ) -> Result<Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.arg(short, "", desc, into)
+        self.arg(short, "", desc, into, label)
     }
 
     pub fn long_arg<T: FromStr+ToString>(self,
-        long: &'static str, desc: &'static str, into: &mut T
+        long: &'static str, desc: &'static str, into: &mut T, label: Option<&'static str>
     ) -> Result<Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.arg('\0', long, desc, into)
+        self.arg('\0', long, desc, into, label)
     }
 
 
@@ -366,7 +369,10 @@ impl Parser {
         if self.should_ignore(false) { return Ok(self); }
 
         // TODO: if self.wants_help()
-        self.printer.add_arg(printer::Argument::new(short, long, desc), self.curr_group)?;
+        self.printer.add_arg(
+            printer::Argument::new(short, long, desc, None, Some(into.to_string())),
+            self.curr_group
+        )?;
 
         let found_opt = self.find_match(short, long, false);
         if found_opt.is_none() { // TODO: required flag
@@ -421,7 +427,10 @@ impl Parser {
         if self.should_ignore(false) { return Ok(self); }
 
         // TODO: if self.wants_help()
-        self.printer.add_arg(printer::Argument::new(short, long, desc), self.curr_group)?;
+        self.printer.add_arg(
+            printer::Argument::new(short, long, desc, None, Some(into.to_string())),
+            self.curr_group
+        )?;
 
         loop { // loop until we get no results back
             let found_opt = self.find_match(short, long, false);
@@ -469,7 +478,7 @@ impl Parser {
 
     pub fn list<T: FromStr + ToString>(mut self,
         short: char, long: &'static str, desc: &'static str,
-        into: &mut Vec<T>
+        into: &mut Vec<T>, label: Option<&'static str>
     ) -> Result<Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
@@ -477,7 +486,10 @@ impl Parser {
         if self.should_ignore(false) { return Ok(self); }
 
         // TODO: if self.wants_help()
-        self.printer.add_arg(printer::Argument::new(short, long, desc), self.curr_group)?;
+        self.printer.add_arg(
+            printer::Argument::new(short, long, desc, label, None),
+            self.curr_group
+        )?;
 
         loop { // loop until we get no results back
             let found_opt = self.find_match(short, long, true);
@@ -513,20 +525,20 @@ impl Parser {
 
     pub fn short_list<T: FromStr + ToString>(self,
         short: char, desc: &'static str,
-        into: &mut Vec<T>
+        into: &mut Vec<T>, label: Option<&'static str>
     ) -> Result<Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.list(short, "", desc, into)
+        self.list(short, "", desc, into, label)
     }
 
     pub fn long_list<T: FromStr + ToString>(self,
         long: &'static str, desc: &'static str,
-        into: &mut Vec<T>
+        into: &mut Vec<T>, label: Option<&'static str>
     ) -> Result<Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.list('\0', long, desc, into)
+        self.list('\0', long, desc, into, label)
     }
 
 
@@ -545,7 +557,9 @@ impl Parser {
         // must move into it unconditionally
         self.walk_next_level();
 
-        if self.should_ignore(true) { return Ok(self); }
+        if self.should_ignore(true) {
+            return Ok(self);
+        }
 
         // TODO: if self.wants_help()
         self.printer.add_subcommand(printer::Subcommand::new(name, desc));
@@ -608,7 +622,7 @@ mod handle_args {
         let test_args = string_vec!("a", "b", "c");
         assert!(test_args.len() == 3);
         Parser::from_strings(test_args)
-            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity)
+            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity, None)
                 .expect("failed to handle verbose argument(s)")
         ;
     }
@@ -617,7 +631,7 @@ mod handle_args {
     fn as_args_iter() {
         let mut verbosity: u64 = 0;
         Parser::from_args()
-            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity)
+            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity, None)
                 .expect("failed to handle verbose argument(s)")
         ;
     }
@@ -635,11 +649,11 @@ mod args {
 
         let args = string_vec!("argv[0]", "-f", "foo.bar", "-s", "foo", "--long", "bar");
         Parser::from_strings(args)
-            .arg('f', "file", "file to handle", &mut file)
+            .arg('f', "file", "file to handle", &mut file, None)
                 .expect("failed to parse file argument")
-            .short_arg('s', "a short arg", &mut short)
+            .short_arg('s', "a short arg", &mut short, None)
                 .expect("failed to parse short arg")
-            .long_arg("long", "a long arg", &mut long)
+            .long_arg("long", "a long arg", &mut long, None)
                 .expect("failed to parse short arg")
         ;
 
@@ -656,11 +670,11 @@ mod args {
 
         let args = string_vec!("argv[0]", "-f=foo.bar", "-s=17", "--long", "10");
         Parser::from_strings(args)
-            .arg('f', "file", "file to handle", &mut file)
+            .arg('f', "file", "file to handle", &mut file, None)
                 .expect("failed to parse file argument")
-            .short_arg('s', "a short arg", &mut short)
+            .short_arg('s', "a short arg", &mut short, None)
                 .expect("failed to parse short arg")
-            .long_arg("long", "a long arg", &mut long)
+            .long_arg("long", "a long arg", &mut long, None)
                 .expect("failed to parse short arg")
         ;
 
@@ -680,8 +694,10 @@ mod flags {
         let mut debug_mode_long: bool = false;
 
         Parser::from_strings(string_vec!("argv[0]", "-s", "--long"))
-            .short_flag('s',   "check short only", &mut debug_mode_short, false).expect("bad short mode")
-            .long_flag("long", "check long only",  &mut debug_mode_long, false).expect("bad long mode")
+            .short_flag('s',   "check short only", &mut debug_mode_short, false)
+                .expect("bad short mode")
+            .long_flag("long", "check long only",  &mut debug_mode_long, false)
+                .expect("bad long mode")
         ;
 
         assert!(debug_mode_short, "did not set with short flag");
@@ -771,7 +787,7 @@ mod lists {
         let mut test_list: Vec<String> = vec!();
 
         Parser::from_strings(string_vec!("argv[0]", "-f", "foo.bar", "--file", "bar.baz", "-f", "last"))
-            .list('f', "file", "add file to list", &mut test_list).expect("bad list")
+            .list('f', "file", "add file to list", &mut test_list, None).expect("bad list")
         ;
 
         assert!(test_list.len() == 3, "incorrect vector len {}", test_list.len());
@@ -785,7 +801,7 @@ mod lists {
         let mut test_list: Vec<String> = vec!();
 
         Parser::from_strings(string_vec!("argv[0]", "-f=foo.bar", "--file=bar.baz", "-f=last"))
-            .list('f', "file", "add file to list", &mut test_list).expect("bad list")
+            .list('f', "file", "add file to list", &mut test_list, None).expect("bad list")
         ;
 
         assert!(test_list.len() == 3, "incorrect vector len {}", test_list.len());
@@ -831,11 +847,14 @@ mod subcommands {
         let mut test_file: String = "test".to_string();
 
         Parser::from_strings(string_vec!("argv[0]", "build", "-f=hahaha.txt"))
-            .subcommand("build", "do a build", &mut subs).expect("bad sub(build)")
-                .arg('f', "file", "file to build", &mut build_file).expect("bad build-file")
+            .subcommand("build", "do a build", &mut subs)
+                .expect("bad sub(build)")
+                .arg('f', "file", "file to build", &mut build_file, None)
+                    .expect("bad build-file")
                 .done().expect("no done on build")
             .subcommand("test", "test a target", &mut subs).expect("bad sub(test)")
-                .arg('f', "file", "file to test", &mut test_file).expect("bad test-file")
+                .arg('f', "file", "file to test", &mut test_file, None)
+                    .expect("bad test-file")
                 .done().expect("no done on test")
         ;
 

@@ -54,24 +54,41 @@ pub struct Argument {
     short: char,
     long: &'static str,
     desc: &'static str,
+    label: Option<&'static str>,
+    default: Option<String>,
 }
 impl Argument {
     // TODO: take item name and default value
-    pub fn new(short: char, long: &'static str, desc: &'static str) -> Argument {
+    pub fn new(
+        short: char, long: &'static str, desc: &'static str,
+        label: Option<&'static str>, default: Option<String>
+    ) -> Argument
+    {
         Argument{
             short: short,
             long: long,
             desc: desc,
+            label: label,
+            default: default,
         }
     }
 
     pub fn arg_string(&self) -> String {
-        arg_string(self.short, self.long, true)
+        if let Some(l) = self.label {
+            format!("{} {}", arg_string(self.short, self.long, true), l)
+        } else {
+            arg_string(self.short, self.long, true)
+        }
     }
 }
 impl Descriptor for Argument {
     fn left_len(&self) -> usize {
-        arg_string_len(self.short, self.long)
+        let base = arg_string_len(self.short, self.long);
+        if let Some(l) = self.label {
+            base + 1 + l.len()
+        } else {
+            base
+        }
     }
 }
 impl Printable for Argument {
@@ -82,6 +99,14 @@ impl Printable for Argument {
         let args = self.arg_string();
         let left = " ".repeat(left_pad);
         let mid = " ".repeat(longest_left - args.len() + MID_PAD_LENGTH);
+
+        if let Some(d) = &self.default {
+            if !d.is_empty() {
+                println!("{}{}{}{} [default: {}]", left, args, mid, self.desc, d);
+                return;
+            }
+        }
+
         println!("{}{}{}{}", left, args, mid, self.desc);
     }
 }
@@ -288,9 +313,7 @@ impl Printer {
         self.groups.insert(name, Group::new(name, desc));
         Ok(())
     }
-    pub fn add_arg(&mut self, opt: Argument, grp: Option<&'static str>)
-        -> Result<(), Error>
-    {
+    pub fn add_arg(&mut self, opt: Argument, grp: Option<&'static str>) -> Result<(), Error> {
         // TODO: sanity checking?
         self.calculate_longest(&opt);
 

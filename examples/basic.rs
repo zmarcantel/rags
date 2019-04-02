@@ -10,6 +10,7 @@ pub struct Options {
     subcmds: Vec<String>,
 
     build_release: bool,
+    build_link: Vec<String>,
 }
 impl Options {
     pub fn new() -> Options {
@@ -21,6 +22,7 @@ impl Options {
             subcmds: vec!(),
 
             build_release: false,
+            build_link: vec!(),
         }
     }
 }
@@ -33,7 +35,8 @@ fn handle_args(opts: &mut Options) -> Result<(), rags::Error> {
                 &mut opts.verbosity, 1)?
             .done()?
         .subcommand("build", "build a target", &mut opts.subcmds)?
-            .arg('f', "file", "file to build", &mut opts.file)?
+            .arg('f', "file", "file to build", &mut opts.file, Some("FILE"))?
+            .list('l', "lib", "libraries to link", &mut opts.build_link, Some("LIB"))?
             .long_flag("release", "do a release build", &mut opts.build_release, false)?
             .done()?
     ;
