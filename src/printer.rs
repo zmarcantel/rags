@@ -258,7 +258,7 @@ impl Printer {
         let has_args = (!self.opts.is_empty()) || (group_args_count > 0);
 
         if has_args {
-            println!("usage: ");
+            println!("usage: {} {}", self.app.name, self.generate_usage());
             println!("");
         }
 
@@ -308,6 +308,89 @@ impl Printer {
     }
     pub fn set_long_desc(&mut self, desc: &'static str) {
         self.app.long_desc = desc;
+    }
+
+    fn generate_usage(&self) -> String {
+        let mut opt_shorts: Vec<String> = vec!();
+        let mut opt_longs: Vec<String> = vec!();
+        let mut req_shorts: Vec<String> = vec!();
+        let mut req_longs: Vec<String> = vec!();
+
+        let mut filter_opt = |o: &Argument| {
+            let (result, is_long) = if o.short.is_alphabetic() {
+                if let Some(label) = o.label {
+                    (format!("-{} {}", o.short, label), true)
+                } else {
+                    (o.short.to_string(), false)
+                }
+            } else {
+                if let Some(label) = o.label {
+                    (format!("--{} {}", o.long, label), true)
+                } else {
+                    (format!("--{}", o.long), true)
+                }
+            };
+
+            if o.required {
+                if is_long { req_longs.push(result); }
+                else { req_shorts.push(result); }
+            } else {
+                if is_long { opt_longs.push(result); }
+                else { opt_shorts.push(result); }
+            }
+        };
+
+        for o in self.opts.iter() {
+            filter_opt(o);
+        }
+
+        for (_, g) in self.groups.iter() {
+            for o in g.opts.iter() {
+                filter_opt(o);
+            }
+        }
+
+        let opt_short_string = opt_shorts.join("");
+        let opt_long_string = opt_longs.join(" ");
+
+        let req_short_string = req_shorts.join("");
+        let req_long_string = req_longs.join(" ");
+
+        let opts = if (!opt_short_string.is_empty()) && (!opt_long_string.is_empty()) {
+            format!("[-{} {}]", opt_short_string, opt_long_string)
+        } else if !opt_short_string.is_empty() {
+            format!("[-{}]", opt_short_string)
+        } else if !opt_long_string.is_empty() {
+            format!("[{}]", opt_long_string)
+        } else {
+            "".to_string()
+        };
+
+        let reqs = if (!req_short_string.is_empty()) && (!req_long_string.is_empty()) {
+            format!("-{} {}", req_short_string, req_long_string)
+        } else if !req_short_string.is_empty() {
+            format!("-{}", req_short_string)
+        } else if !req_long_string.is_empty() {
+            format!("{}", req_long_string)
+        } else {
+            "".to_string()
+        };
+
+        let arg_usage = if (!opts.is_empty()) && (!reqs.is_empty()) {
+            format!("{} {}", opts, reqs)
+        } else if !opts.is_empty() {
+            opts
+        } else if !opts.is_empty() {
+            reqs
+        } else {
+            "".to_string()
+        };
+
+        if !self.subs.is_empty() {
+            format!("{{subcommand}} {}", arg_usage)
+        } else {
+            arg_usage
+        }
     }
 
 
