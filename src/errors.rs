@@ -11,6 +11,8 @@ pub enum Error {
 
     NestedGroup(&'static str, &'static str), // existing, attempted
     PrinterMissingGroup(&'static str),
+
+    MissingArgument(String),
 }
 
 impl std::error::Error for Error {
@@ -37,6 +39,11 @@ impl std::error::Error for Error {
             }
             Error::PrinterMissingGroup(_) => {
                 "cannot add option to unknown group"
+            }
+
+
+            Error::MissingArgument(_) => {
+                "required argument was not given"
             }
         }
     }
@@ -70,7 +77,11 @@ impl std::fmt::Display for Error {
                 write!(f, "{} ({} within {})", self.description(), attempt, orig)
             }
             Error::PrinterMissingGroup(name) => {
-                write!(f, "{} : {}", self.description(), name)
+                write!(f, "{}: {}", self.description(), name)
+            }
+
+            Error::MissingArgument(a) => {
+                write!(f, "{}: {}", self.description(), a)
             }
         }
     }

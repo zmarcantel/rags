@@ -8,25 +8,27 @@ pub mod errors;
 pub use errors::*;
 
 mod printer;
+use printer::arg_string;
 
 #[macro_export]
 macro_rules! argparse {
     () => {{
-        let p = $crate::Parser::from_args();
+        let mut p = $crate::Parser::from_args();
         argparse!(p, true)
     }};
     ($args:ident) => {{
-        let p = $crate::Parser::from_strings($args);
+        let mut p = $crate::Parser::from_strings($args);
         argparse!(p, true)
     }};
     ($args:expr) => {{
-        let p = $crate::Parser::from_strings($args);
+        let mut p = $crate::Parser::from_strings($args);
         argparse!(p, true)
     }};
     ($p:ident, true) => {{
         $p.set_app_name(env!("CARGO_PKG_NAME"))
             .set_app_version(env!("CARGO_PKG_VERSION"))
-            .set_app_desc(env!("CARGO_PKG_DESCRIPTION"))
+            .set_app_desc(env!("CARGO_PKG_DESCRIPTION"));
+        $p
     }}
 }
 
@@ -96,22 +98,22 @@ impl Parser {
     // help setup
     //----------------------------------------------------------------
 
-    pub fn set_app_name(mut self, name: &'static str) -> Parser {
+    pub fn set_app_name<'a>(&'a mut self, name: &'static str) -> &'a mut Parser {
         self.printer.set_name(name);
         self
     }
 
-    pub fn set_app_desc(mut self, desc: &'static str) -> Parser {
+    pub fn set_app_desc<'a>(&'a mut self, desc: &'static str) -> &'a mut Parser {
         self.printer.set_short_desc(desc);
         self
     }
 
-    pub fn set_app_long_desc(mut self, desc: &'static str) -> Parser {
+    pub fn set_app_long_desc<'a>(&'a mut self, desc: &'static str) -> &'a mut Parser {
         self.printer.set_long_desc(desc);
         self
     }
 
-    pub fn set_app_version(mut self, vers: &'static str) -> Parser {
+    pub fn set_app_version<'a>(&'a mut self, vers: &'static str) -> &'a mut Parser {
         self.printer.set_version(vers);
         self
     }
@@ -125,7 +127,7 @@ impl Parser {
     // parse helpers
     //----------------------------------------------------------------
 
-    pub fn done(mut self) -> Result<Parser, Error> {
+    pub fn done(&mut self) -> Result<&mut Parser, Error> {
         if self.curr_group.is_some() {
             self.curr_group = None;
             return Ok(self);
@@ -228,7 +230,14 @@ impl Parser {
         // we got exactly what we were looking for, so return
         if arg.len() == end_of_arg {
             let has_next = self.mask.contains(idx + 1);
-            return (true, if expect_value && has_next {ValueLocation::TakesNext} else {ValueLocation::Unknown});
+            return (
+                true,
+                if expect_value && has_next {
+                    ValueLocation::TakesNext
+                } else {
+                    ValueLocation::Unknown
+                }
+            );
         }
 
         // we got here, so the string is longer than we expect
@@ -245,7 +254,9 @@ impl Parser {
         (false, ValueLocation::Unknown)
     }
 
-    fn find_match(&self, short: char, long: &'static str, expect_value: bool) -> Option<FoundMatch> {
+    fn find_match(&self, short: char, long: &'static str, expect_value: bool)
+        -> Option<FoundMatch>
+    {
         for i in self.mask.iter() {
             let (matches, arg_loc) = self.matches_short(i, short, expect_value);
             if matches {
@@ -311,10 +322,10 @@ impl Parser {
     // arg(s)
     //----------------------------------------------------------------
 
-    pub fn arg<T: FromStr+ToString>(mut self,
+    pub fn arg<'a, T: FromStr+ToString>(&'a mut self,
         short: char, long: &'static str, desc: &'static str,
-        into: &mut T, label: Option<&'static str>
-    ) -> Result<Parser, Error>
+        into: &mut T, label: Option<&'static str>, required: bool
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
 
@@ -322,12 +333,15 @@ impl Parser {
 
         // TODO: if self.wants_help()
         self.printer.add_arg(
-            printer::Argument::new(short, long, desc, label, Some(into.to_string())),
+            printer::Argument::new(short, long, desc, label, Some(into.to_string()), required),
             self.curr_group
         )?;
 
         let found_opt = self.find_match(short, long, true);
-        if found_opt.is_none() { // TODO: required arg flag
+        if found_opt.is_none() {
+            if required {
+                return Err(Error::MissingArgument(arg_string(short, long, false)));
+            }
             return Ok(self);
         }
 
@@ -338,20 +352,22 @@ impl Parser {
         Ok(self)
     }
 
-    pub fn short_arg<T: FromStr+ToString>(self,
-        short: char, desc: &'static str, into: &mut T, label: Option<&'static str>
-    ) -> Result<Parser, Error>
+    pub fn short_arg<'a, T: FromStr+ToString>(&'a mut self,
+        short: char, desc: &'static str, into: &mut T, label: Option<&'static str>,
+        required: bool
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.arg(short, "", desc, into, label)
+        self.arg(short, "", desc, into, label, required)
     }
 
-    pub fn long_arg<T: FromStr+ToString>(self,
-        long: &'static str, desc: &'static str, into: &mut T, label: Option<&'static str>
-    ) -> Result<Parser, Error>
+    pub fn long_arg<'a, T: FromStr+ToString>(&'a mut self,
+        long: &'static str, desc: &'static str, into: &mut T, label: Option<&'static str>,
+        required: bool
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.arg('\0', long, desc, into, label)
+        self.arg('\0', long, desc, into, label, required)
     }
 
 
@@ -360,17 +376,17 @@ impl Parser {
     // flag(s)
     //----------------------------------------------------------------
 
-    pub fn flag(mut self,
+    pub fn flag<'a>(&'a mut self,
         short: char, long: &'static str, desc: &'static str,
         into: &mut bool, invert: bool
-    ) -> Result<Parser, Error>
+    ) -> Result<&'a mut Parser, Error>
     {
 
         if self.should_ignore(false) { return Ok(self); }
 
         // TODO: if self.wants_help()
         self.printer.add_arg(
-            printer::Argument::new(short, long, desc, None, Some(into.to_string())),
+            printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
             self.curr_group
         )?;
 
@@ -397,18 +413,18 @@ impl Parser {
         Ok(self)
     }
 
-    pub fn short_flag(self,
+    pub fn short_flag<'a>(&'a mut self,
         short: char, desc: &'static str,
         into: &mut bool, invert: bool
-    ) -> Result<Parser, Error>
+    ) -> Result<&'a mut Parser, Error>
     {
         self.flag(short, "", desc, into, invert)
     }
 
-    pub fn long_flag(self,
+    pub fn long_flag<'a>(&'a mut self,
         long: &'static str, desc: &'static str,
-        into: &mut bool, invert: bool
-    ) -> Result<Parser, Error>
+        into: &'a mut bool, invert: bool
+    ) -> Result<&'a mut Parser, Error>
     {
         self.flag('\0', long, desc, into, invert)
     }
@@ -418,17 +434,17 @@ impl Parser {
     // count(s)
     //----------------------------------------------------------------
 
-    pub fn count<T: std::ops::AddAssign + ToString + Clone>(mut self,
+    pub fn count<'a, T: std::ops::AddAssign + ToString + Clone>(&'a mut self,
         short: char, long: &'static str, desc: &'static str,
         into: &mut T, step: T
-    ) -> Result<Parser, Error>
+    ) -> Result<&'a mut Parser, Error>
     {
 
         if self.should_ignore(false) { return Ok(self); }
 
         // TODO: if self.wants_help()
         self.printer.add_arg(
-            printer::Argument::new(short, long, desc, None, Some(into.to_string())),
+            printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
             self.curr_group
         )?;
 
@@ -455,18 +471,18 @@ impl Parser {
         }
     }
 
-    pub fn short_count<T: std::ops::AddAssign + ToString + Clone>(self,
+    pub fn short_count<'a, T: std::ops::AddAssign + ToString + Clone>(&'a mut self,
         short: char, desc: &'static str,
         into: &mut T, step: T
-    ) -> Result<Parser, Error>
+    ) -> Result<&'a mut Parser, Error>
     {
         self.count(short, "", desc, into, step)
     }
 
-    pub fn long_count<T: std::ops::AddAssign + ToString + Clone>(self,
+    pub fn long_count<'a, T: std::ops::AddAssign + ToString + Clone>(&'a mut self,
         long: &'static str, desc: &'static str,
         into: &mut T, step: T
-    ) -> Result<Parser, Error>
+    ) -> Result<&'a mut Parser, Error>
     {
         self.count('\0', long, desc, into, step)
     }
@@ -476,10 +492,10 @@ impl Parser {
     // list(s)
     //----------------------------------------------------------------
 
-    pub fn list<T: FromStr + ToString>(mut self,
+    pub fn list<'a, T: FromStr + ToString>(&'a mut self,
         short: char, long: &'static str, desc: &'static str,
-        into: &mut Vec<T>, label: Option<&'static str>
-    ) -> Result<Parser, Error>
+        into: &mut Vec<T>, label: Option<&'static str>, required: bool
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
 
@@ -487,15 +503,20 @@ impl Parser {
 
         // TODO: if self.wants_help()
         self.printer.add_arg(
-            printer::Argument::new(short, long, desc, label, None),
+            printer::Argument::new(short, long, desc, label, None, required),
             self.curr_group
         )?;
 
+        let mut found_count = 0;
         loop { // loop until we get no results back
             let found_opt = self.find_match(short, long, true);
             if found_opt.is_none() { // TODO: required count -- does this make sense?
+                if required && (found_count == 0) {
+                    return Err(Error::MissingArgument(arg_string(short, long, false)));
+                }
                 return Ok(self);
             }
+            found_count += 1;
 
             let found = found_opt.unwrap();
             self.mask.remove(found.index);
@@ -523,22 +544,22 @@ impl Parser {
         }
     }
 
-    pub fn short_list<T: FromStr + ToString>(self,
+    pub fn short_list<'a, T: FromStr + ToString>(&'a mut self,
         short: char, desc: &'static str,
-        into: &mut Vec<T>, label: Option<&'static str>
-    ) -> Result<Parser, Error>
+        into: &mut Vec<T>, label: Option<&'static str>, required: bool
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.list(short, "", desc, into, label)
+        self.list(short, "", desc, into, label, required)
     }
 
-    pub fn long_list<T: FromStr + ToString>(self,
+    pub fn long_list<'a, T: FromStr + ToString>(&'a mut self,
         long: &'static str, desc: &'static str,
-        into: &mut Vec<T>, label: Option<&'static str>
-    ) -> Result<Parser, Error>
+        into: &mut Vec<T>, label: Option<&'static str>, required: bool
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        self.list('\0', long, desc, into, label)
+        self.list('\0', long, desc, into, label, required)
     }
 
 
@@ -547,9 +568,9 @@ impl Parser {
     // subcommand(s)
     //----------------------------------------------------------------
 
-    pub fn subcommand<T: FromStr + ToString>(mut self,
+    pub fn subcommand<'a, T: FromStr + ToString>(&'a mut self,
         name: &'static str, desc: &'static str, into: &mut Vec<T>
-    ) -> Result<Parser, Error>
+    ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
         // even if we do not match this subcommand, all parsing until the
@@ -586,8 +607,8 @@ impl Parser {
     // group(s)
     //----------------------------------------------------------------
 
-    pub fn group(mut self, name: &'static str, desc: &'static str)
-        -> Result<Parser, Error>
+    pub fn group<'a>(&'a mut self, name: &'static str, desc: &'static str)
+        -> Result<&'a mut Parser, Error>
     {
         if let Some(orig) = self.curr_group {
             return Err(Error::NestedGroup(orig, name));

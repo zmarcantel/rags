@@ -56,12 +56,14 @@ pub struct Argument {
     desc: &'static str,
     label: Option<&'static str>,
     default: Option<String>,
+    required: bool,
 }
 impl Argument {
     // TODO: take item name and default value
     pub fn new(
         short: char, long: &'static str, desc: &'static str,
-        label: Option<&'static str>, default: Option<String>
+        label: Option<&'static str>, default: Option<String>,
+        required: bool
     ) -> Argument
     {
         Argument{
@@ -70,6 +72,7 @@ impl Argument {
             desc: desc,
             label: label,
             default: default,
+            required: required,
         }
     }
 
@@ -100,14 +103,18 @@ impl Printable for Argument {
         let left = " ".repeat(left_pad);
         let mid = " ".repeat(longest_left - args.len() + MID_PAD_LENGTH);
 
-        if let Some(d) = &self.default {
-            if !d.is_empty() {
-                println!("{}{}{}{} [default: {}]", left, args, mid, self.desc, d);
-                return;
-            }
-        }
+        let has_default = self.default.is_some();
+        let accesories = if has_default && self.required {
+            format!(" [required, default: {}]", self.default.as_ref().unwrap())
+        } else if has_default {
+            format!(" [default: {}]", self.default.as_ref().unwrap())
+        } else if self.required {
+            " [required]".to_string()
+        } else {
+            "".to_string()
+        };
 
-        println!("{}{}{}{}", left, args, mid, self.desc);
+        println!("{}{}{}{}{}", left, args, mid, self.desc, accesories);
     }
 }
 
