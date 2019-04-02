@@ -65,6 +65,7 @@ pub struct Parser {
     parse_done: bool,
     curr_group: Option<&'static str>,
 
+    help: bool,
     printer: printer::Printer,
 }
 impl Parser {
@@ -76,7 +77,7 @@ impl Parser {
             bits.insert(i);
         }
 
-        Parser{
+        let mut p = Parser{
             args: input,
             mask: bits,
             walk_depth: 0,
@@ -85,8 +86,16 @@ impl Parser {
             parse_done: false,
             curr_group: None,
 
+            help: true, //force it on so the -h/--help gets added to help. will disable itself
             printer: printer::Printer::new(printer::App::empty()),
-        }
+        };
+
+        let mut wants_help = false;
+        p.flag('h', "help", "print this help dialog", &mut wants_help, false)
+            .expect("could not handle help flag");
+        p.help = wants_help;
+
+        p
     }
     pub fn from_args() -> Parser {
         let args = env::args().collect::<Vec<String>>();
@@ -116,6 +125,11 @@ impl Parser {
     pub fn set_app_version<'a>(&'a mut self, vers: &'static str) -> &'a mut Parser {
         self.printer.set_version(vers);
         self
+    }
+
+
+    pub fn wants_help(&self) -> bool {
+        self.help
     }
 
     pub fn print_help(&self) {
@@ -331,15 +345,21 @@ impl Parser {
 
         if self.should_ignore(false) { return Ok(self); }
 
-        // TODO: if self.wants_help()
-        self.printer.add_arg(
-            printer::Argument::new(short, long, desc, label, Some(into.to_string()), required),
-            self.curr_group
-        )?;
+        // only add help if it is wanted
+        if self.wants_help() {
+            self.printer.add_arg(
+                printer::Argument::new(
+                    short, long, desc,
+                    label, Some(into.to_string()), required
+                ),
+                self.curr_group
+            )?;
+        }
 
         let found_opt = self.find_match(short, long, true);
         if found_opt.is_none() {
-            if required {
+            // only required if !help
+            if required  && !self.wants_help() {
                 return Err(Error::MissingArgument(arg_string(short, long, false)));
             }
             return Ok(self);
@@ -384,11 +404,12 @@ impl Parser {
 
         if self.should_ignore(false) { return Ok(self); }
 
-        // TODO: if self.wants_help()
-        self.printer.add_arg(
-            printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
-            self.curr_group
-        )?;
+        if self.wants_help() {
+            self.printer.add_arg(
+                printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
+                self.curr_group
+            )?;
+        }
 
         let found_opt = self.find_match(short, long, false);
         if found_opt.is_none() { // TODO: required flag
@@ -442,11 +463,12 @@ impl Parser {
 
         if self.should_ignore(false) { return Ok(self); }
 
-        // TODO: if self.wants_help()
-        self.printer.add_arg(
-            printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
-            self.curr_group
-        )?;
+        if self.wants_help() {
+            self.printer.add_arg(
+                printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
+                self.curr_group
+            )?;
+        }
 
         loop { // loop until we get no results back
             let found_opt = self.find_match(short, long, false);
@@ -501,17 +523,19 @@ impl Parser {
 
         if self.should_ignore(false) { return Ok(self); }
 
-        // TODO: if self.wants_help()
-        self.printer.add_arg(
-            printer::Argument::new(short, long, desc, label, None, required),
-            self.curr_group
-        )?;
+        if self.wants_help() {
+            self.printer.add_arg(
+                printer::Argument::new(short, long, desc, label, None, required),
+                self.curr_group
+            )?;
+        }
 
         let mut found_count = 0;
         loop { // loop until we get no results back
             let found_opt = self.find_match(short, long, true);
             if found_opt.is_none() { // TODO: required count -- does this make sense?
-                if required && (found_count == 0) {
+                // only requried when !help
+                if required && (found_count == 0) && !self.wants_help() {
                     return Err(Error::MissingArgument(arg_string(short, long, false)));
                 }
                 return Ok(self);

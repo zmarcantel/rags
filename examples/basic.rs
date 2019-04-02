@@ -41,8 +41,6 @@ fn handle_args(parser: &mut rags::Parser, opts: &mut Options) -> Result<(), rags
             .done()?
     ;
 
-    parser.print_help();
-
     Ok(())
 }
 
@@ -59,5 +57,10 @@ fn main() {
             std::process::exit(1);
         }
     }
-    println!("final config: {:?}", opts);
+
+    if parser.wants_help() {
+        parser.print_help();
+    } else {
+        println!("final config: {:?}", opts);
+    }
 }
