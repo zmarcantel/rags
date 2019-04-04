@@ -25,9 +25,9 @@ macro_rules! argparse {
         argparse!(p, true)
     }};
     ($p:ident, true) => {{
-        $p.set_app_name(env!("CARGO_PKG_NAME"))
-            .set_app_version(env!("CARGO_PKG_VERSION"))
-            .set_app_desc(env!("CARGO_PKG_DESCRIPTION"));
+        $p.app_name(env!("CARGO_PKG_NAME"))
+            .app_version(env!("CARGO_PKG_VERSION"))
+            .app_desc(env!("CARGO_PKG_DESCRIPTION"));
         $p
     }}
 }
@@ -107,22 +107,22 @@ impl Parser {
     // help setup
     //----------------------------------------------------------------
 
-    pub fn set_app_name<'a>(&'a mut self, name: &'static str) -> &'a mut Parser {
+    pub fn app_name<'a>(&'a mut self, name: &'static str) -> &'a mut Parser {
         self.printer.set_name(name);
         self
     }
 
-    pub fn set_app_desc<'a>(&'a mut self, desc: &'static str) -> &'a mut Parser {
+    pub fn app_desc<'a>(&'a mut self, desc: &'static str) -> &'a mut Parser {
         self.printer.set_short_desc(desc);
         self
     }
 
-    pub fn set_app_long_desc<'a>(&'a mut self, desc: &'static str) -> &'a mut Parser {
+    pub fn app_long_desc<'a>(&'a mut self, desc: &'static str) -> &'a mut Parser {
         self.printer.set_long_desc(desc);
         self
     }
 
-    pub fn set_app_version<'a>(&'a mut self, vers: &'static str) -> &'a mut Parser {
+    pub fn app_version<'a>(&'a mut self, vers: &'static str) -> &'a mut Parser {
         self.printer.set_version(vers);
         self
     }
@@ -593,7 +593,8 @@ impl Parser {
     //----------------------------------------------------------------
 
     pub fn subcommand<'a, T: FromStr + ToString>(&'a mut self,
-        name: &'static str, desc: &'static str, into: &mut Vec<T>
+        name: &'static str, desc: &'static str, into: &mut Vec<T>,
+        long_desc: Option<&'static str>
     ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
@@ -621,7 +622,10 @@ impl Parser {
             );
 
             self.commit_next_level();
-            self.printer.new_level();
+            self.printer.new_level(
+                name, desc,
+                if let Some(d) = long_desc { d } else { "" }
+            );
         }
 
         Ok(self)

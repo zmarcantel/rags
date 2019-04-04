@@ -182,6 +182,7 @@ impl Printable for Group {
 
 pub struct App {
     name: &'static str,
+    subnames: Vec<&'static str>,
     short_desc: &'static str,
     long_desc: &'static str,
     version: &'static str,
@@ -197,9 +198,28 @@ impl App {
     ) -> App {
         App{
             name: name,
+            subnames: vec!(),
             short_desc: short,
             long_desc: long,
             version: vers,
+        }
+    }
+
+    pub fn append_subcommand(
+        &mut self, name: &'static str,
+        short_desc: &'static str, long_desc: &'static str,
+    ) {
+        self.subnames.push(name);
+        self.short_desc = short_desc;
+        self.long_desc = long_desc;
+    }
+
+    pub fn display_name(&self) -> String {
+        if self.subnames.is_empty() {
+            self.name.to_string()
+        } else {
+            format!("{} {}", self.name,
+                self.subnames.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(" "))
         }
     }
 }
@@ -213,11 +233,11 @@ impl Printable for App {
         let has_desc = !self.short_desc.is_empty();
 
         if has_name && has_vers && has_desc {
-            println!("{} {} - {}", self.name, self.version, self.short_desc);
+            println!("{} - {} - {}", self.display_name(), self.version, self.short_desc);
         } else if has_name && has_vers {
-            println!("{} {}", self.name, self.version);
+            println!("{} - {}", self.display_name(), self.version);
         } else if has_name {
-            println!("{}", self.name);
+            println!("{}", self.display_name());
         }
         println!("");
     }
@@ -244,8 +264,12 @@ impl Printer {
         }
     }
 
-    pub fn new_level(&mut self) {
+    pub fn new_level(
+        &mut self, named: &'static str,
+        short_desc: &'static str, long_desc: &'static str
+    ) {
         self.subs.clear();
+        self.app.append_subcommand(named, short_desc, long_desc);
     }
 
     pub fn print(&self) {
@@ -258,7 +282,7 @@ impl Printer {
         let has_args = (!self.opts.is_empty()) || (group_args_count > 0);
 
         if has_args {
-            println!("usage: {} {}", self.app.name, self.generate_usage());
+            println!("usage: {} {}", self.app.display_name(), self.generate_usage());
             println!("");
         }
 
