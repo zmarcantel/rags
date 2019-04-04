@@ -59,7 +59,6 @@ pub struct Argument {
     required: bool,
 }
 impl Argument {
-    // TODO: take item name and default value
     pub fn new(
         short: char, long: &'static str, desc: &'static str,
         label: Option<&'static str>, default: Option<String>,
@@ -115,6 +114,66 @@ impl Printable for Argument {
         };
 
         println!("{}{}{}{}{}", left, args, mid, self.desc, accesories);
+    }
+}
+
+
+pub struct Positional {
+    name: &'static str,
+    desc: &'static str,
+    default: Option<String>,
+    required: bool,
+    variadic: bool
+}
+impl Positional {
+    pub fn new(
+        name: &'static str, desc: &'static str,
+        default: Option<String>, required: bool, variadic: bool
+    ) -> Positional
+    {
+        Positional{
+            name: name,
+            desc: desc,
+            default: default,
+            required: required,
+            variadic: variadic,
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        if self.variadic {
+            format!("{}...", self.name)
+        } else {
+            self.name.to_string()
+        }
+    }
+}
+impl Descriptor for Positional {
+    fn left_len(&self) -> usize {
+        self.name.len()
+    }
+}
+impl Printable for Positional {
+    fn should_print(&self) -> bool {
+        !self.name.is_empty()
+    }
+    fn print(&self, left_pad: usize, longest_left: usize) {
+        let display_name = self.display_name();
+        let left = " ".repeat(left_pad);
+        let mid = " ".repeat(longest_left - display_name.len() + MID_PAD_LENGTH);
+
+        let has_default = self.default.is_some();
+        let accesories = if has_default && self.required {
+            format!(" [required, default: {}]", self.default.as_ref().unwrap())
+        } else if has_default {
+            format!(" [default: {}]", self.default.as_ref().unwrap())
+        } else if self.required {
+            " [required]".to_string()
+        } else {
+            "".to_string()
+        };
+
+        println!("{}{}{}{}{}", left, display_name, mid, self.desc, accesories);
     }
 }
 
@@ -249,6 +308,7 @@ pub struct Printer {
     subs: Vec<Subcommand>,
     groups: BTreeMap<&'static str, Group>,
     opts: Vec<Argument>,
+    pos: Vec<Positional>,
 
     longest_left: usize,
 }
@@ -259,6 +319,7 @@ impl Printer {
             subs: vec!(),
             groups: BTreeMap::new(),
             opts: vec!(),
+            pos: vec!(),
 
             longest_left: 0usize,
         }
@@ -273,6 +334,8 @@ impl Printer {
     }
 
     pub fn print(&self) {
+        let pos_usage = self.generate_positionals();
+
         if self.app.should_print() {
             self.app.print(0, 0);
         }
@@ -282,7 +345,7 @@ impl Printer {
         let has_args = (!self.opts.is_empty()) || (group_args_count > 0);
 
         if has_args {
-            println!("usage: {} {}", self.app.display_name(), self.generate_usage());
+            println!("usage: {} {}", self.app.display_name(), self.generate_usage(pos_usage));
             println!("");
         }
 
@@ -312,9 +375,17 @@ impl Printer {
                 if !o.should_print() { continue; }
                 o.print(LEFT_PAD_LENGTH, self.longest_left);
             }
+            println!("");
         }
 
-        println!("");
+        if !self.pos.is_empty() {
+            println!("positionals:");
+            for p in self.pos.iter() {
+                if !p.should_print() { continue; }
+                p.print(LEFT_PAD_LENGTH, self.longest_left);
+            }
+            println!("");
+        }
     }
 
     fn calculate_longest<T: Descriptor>(&mut self, desc: &T) {
@@ -334,7 +405,7 @@ impl Printer {
         self.app.long_desc = desc;
     }
 
-    fn generate_usage(&self) -> String {
+    fn generate_usage(&self, positionals: String) -> String {
         let mut opt_shorts: Vec<String> = vec!();
         let mut opt_longs: Vec<String> = vec!();
         let mut req_shorts: Vec<String> = vec!();
@@ -411,9 +482,52 @@ impl Printer {
         };
 
         if !self.subs.is_empty() {
-            format!("{{subcommand}} {}", arg_usage)
+            format!("{{subcommand}} {} {}", arg_usage, positionals)
         } else {
-            arg_usage
+            format!("{} {}", arg_usage, positionals)
+        }
+    }
+
+
+    fn generate_positionals(&self) -> String {
+        let mut opt: Vec<String> = vec!();
+        let mut req: Vec<String> = vec!();
+        let mut variadic: String = "".to_string();
+
+        for p in self.pos.iter() {
+            // includes a space so we don't have to do a bunch of checks, just blindly print
+            if p.variadic {
+                if p.required {
+                    variadic = format!(" {}", p.display_name());
+                } else {
+                    variadic = format!(" [{}]", p.display_name());
+                }
+                continue;
+            }
+
+            if p.required {
+                req.push(p.display_name());
+            } else {
+                opt.push(p.display_name());
+            }
+        }
+
+        let opt_str = if !opt.is_empty() {
+            format!("[{}]", opt.join(" "))
+        } else { "".to_string() };
+
+        let req_str = if !req.is_empty() {
+            format!("{}", req.join(" "))
+        } else { "".to_string() };
+
+        if opt_str.is_empty() && req_str.is_empty() {
+            variadic
+        } else if !opt_str.is_empty() && req_str.is_empty() {
+            format!("{}{}", opt_str, variadic)
+        } else if opt_str.is_empty() && !req_str.is_empty() {
+            format!("{}{}", req_str, variadic)
+        } else {
+            format!("{} {}{}", opt_str, req_str, variadic)
         }
     }
 
@@ -446,5 +560,11 @@ impl Printer {
                 Err(Error::PrinterMissingGroup(grpname))
             }
         }
+    }
+    pub fn add_positional(&mut self, pos: Positional) -> Result<(), Error> {
+        // TODO: sanity checking?
+        self.calculate_longest(&pos);
+        self.pos.push(pos);
+        Ok(())
     }
 }

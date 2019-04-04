@@ -7,12 +7,16 @@ pub enum Error {
     InvalidInput(char, &'static str, &'static str),
     MissingArgValue(char, &'static str),
     ConstructionError(char, &'static str, String), // TODO: would be nice to keep the typed-error
+    PositionalConstructionError(&'static str, String), // TODO: would be nice to keep the original
     SubConstructionError(&'static str, String), // TODO: would be nice to keep the typed-error
 
     NestedGroup(&'static str, &'static str), // existing, attempted
     PrinterMissingGroup(&'static str),
 
     MissingArgument(String),
+    MissingPositional(String),
+    MultipleVariadic(&'static str),
+    UnorderedPositionals(&'static str),
 }
 
 impl std::error::Error for Error {
@@ -30,6 +34,9 @@ impl std::error::Error for Error {
             Error::ConstructionError(_, _, _) => {
                 "failed to construct target from string"
             }
+            Error::PositionalConstructionError(_, _) => {
+                "failed to construct positional target from string"
+            }
             Error::SubConstructionError(_, _) => {
                 "failed to construct subcommand from string"
             }
@@ -44,6 +51,15 @@ impl std::error::Error for Error {
 
             Error::MissingArgument(_) => {
                 "required argument was not given"
+            }
+            Error::MissingPositional(_) => {
+                "required positional was not given"
+            }
+            Error::MultipleVariadic(_) => {
+                "second declared variadic positional has no effect"
+            }
+            Error::UnorderedPositionals(_) => {
+                "declaring a positional after a variadic positional has no effect"
             }
         }
     }
@@ -66,7 +82,11 @@ impl std::fmt::Display for Error {
                 write!(f, "{} for {}", self.description(), arg_string(*short, long, false))
             }
             Error::ConstructionError(short, long, err) => {
-                write!(f, "{} for {}: {}", self.description(), arg_string(*short, long, false), err)
+                write!(f, "{} for {}: {}", self.description(),
+                    arg_string(*short, long, false), err)
+            }
+            Error::PositionalConstructionError(name, err) => {
+                write!(f, "{} for {}: {}", self.description(), name, err)
             }
             Error::SubConstructionError(name, err) => {
                 write!(f, "{} for {}: {}", self.description(), name, err)
@@ -82,6 +102,15 @@ impl std::fmt::Display for Error {
 
             Error::MissingArgument(a) => {
                 write!(f, "{}: {}", self.description(), a)
+            }
+            Error::MissingPositional(a) => {
+                write!(f, "{}: {}", self.description(), a)
+            }
+            Error::MultipleVariadic(p) => {
+                write!(f, "{}: {}", self.description(), p)
+            }
+            Error::UnorderedPositionals(p) => {
+                write!(f, "{}: {}", self.description(), p)
             }
         }
     }

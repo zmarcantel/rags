@@ -66,6 +66,7 @@ pub struct Parser {
     curr_group: Option<&'static str>,
 
     help: bool,
+    has_variadic: bool,
     printer: printer::Printer,
 }
 impl Parser {
@@ -86,7 +87,8 @@ impl Parser {
             parse_done: false,
             curr_group: None,
 
-            help: true, //force it on so the -h/--help gets added to help. will disable itself
+            help: false,
+            has_variadic: false,
             printer: printer::Printer::new(printer::App::empty()),
         };
 
@@ -354,6 +356,7 @@ impl Parser {
                 ),
                 self.curr_group
             )?;
+            return Ok(self);
         }
 
         let found_opt = self.find_match(short, long, true);
@@ -396,6 +399,12 @@ impl Parser {
     // flag(s)
     //----------------------------------------------------------------
 
+    // TODO: the help flags should be stored on `self` which is why this is
+    // a member function. once the flag(s) are configurable we will store them
+    // on the parser for this case
+    fn is_help_flags(&self, short: char, long: &'static str) -> bool  {
+        (short == 'h') || (long == "help")
+    }
     pub fn flag<'a>(&'a mut self,
         short: char, long: &'static str, desc: &'static str,
         into: &mut bool, invert: bool
@@ -409,10 +418,14 @@ impl Parser {
                 printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
                 self.curr_group
             )?;
+
+            if !self.is_help_flags(short, long) {
+                return Ok(self);
+            }
         }
 
         let found_opt = self.find_match(short, long, false);
-        if found_opt.is_none() { // TODO: required flag
+        if found_opt.is_none() {
             return Ok(self);
         }
 
@@ -468,6 +481,7 @@ impl Parser {
                 printer::Argument::new(short, long, desc, None, Some(into.to_string()), false),
                 self.curr_group
             )?;
+            return Ok(self);
         }
 
         loop { // loop until we get no results back
@@ -528,6 +542,7 @@ impl Parser {
                 printer::Argument::new(short, long, desc, label, None, required),
                 self.curr_group
             )?;
+            return Ok(self);
         }
 
         let mut found_count = 0;
@@ -607,8 +622,11 @@ impl Parser {
             return Ok(self);
         }
 
-        // TODO: if self.wants_help()
-        self.printer.add_subcommand(printer::Subcommand::new(name, desc));
+        if self.wants_help() {
+            self.printer.add_subcommand(printer::Subcommand::new(name, desc));
+            // do not return, subcommands need to continue parsing to set levels
+            // and help appropriately
+        }
 
         if name.is_empty() {
             return Err(Error::InvalidState("subcommand(...) given empty name"));
@@ -645,10 +663,97 @@ impl Parser {
         if self.should_ignore(false) { return Ok(self); }
 
         self.curr_group = Some(name);
-        self.printer.add_group(name, desc)?;
+        if self.wants_help() {
+            self.printer.add_group(name, desc)?;
+        }
         Ok(self)
     }
 
+
+    //----------------------------------------------------------------
+    // positional(s)
+    //----------------------------------------------------------------
+
+    pub fn positional<'a, T: ToString + FromStr>(&'a mut self,
+        name: &'static str, desc: &'static str,
+        into: &mut T, required: bool
+    ) -> Result<&'a mut Parser, Error>
+        where <T as FromStr>::Err: std::fmt::Display
+    {
+        if self.should_ignore(false) { return Ok(self); }
+
+        if self.has_variadic {
+            return Err(Error::UnorderedPositionals(name));
+        }
+
+        if self.wants_help() {
+            let def = into.to_string();
+            self.printer.add_positional(printer::Positional::new(
+                name, desc, if def.is_empty() { None } else { Some(def) },
+                required, false
+            ))?;
+            return Ok(self);
+        }
+
+        let idx = match self.mask.iter().next() {
+            Some(i) => { i }
+            None => {
+                return Err(Error::MissingPositional(name.to_string()));
+            }
+        };
+        let val = &self.args[idx];
+        *into = T::from_str(val)
+            .map_err(|e| Error::PositionalConstructionError(name, format!("{}", e)))?;
+
+        self.mask.remove(idx);
+
+        Ok(self)
+    }
+
+    pub fn positional_list<'a, T: ToString + FromStr>(&'a mut self,
+        name: &'static str, desc: &'static str,
+        into: &mut Vec<T>, required: bool
+    ) -> Result<&'a mut Parser, Error>
+        where <T as FromStr>::Err: std::fmt::Display
+    {
+        if self.should_ignore(false) { return Ok(self); }
+
+        if self.has_variadic {
+            return Err(Error::MultipleVariadic(name));
+        }
+
+        // TODO: should we print defaults of lists?
+        if self.wants_help() {
+            self.printer.add_positional(printer::Positional::new(
+                name, desc, None, required, true
+            ))?;
+            return Ok(self);
+        }
+
+        let mut found_count: usize = 0;
+        // TODO: I hate this, but self.mask.iter() is immut and mask mod is mut....
+        let mut found_idxs: Vec<usize> = vec!();
+        for i in self.mask.iter() {
+            let val = &self.args[i];
+            into.push(
+                T::from_str(val).map_err(|e|
+                    Error::PositionalConstructionError(name, format!("{}", e))
+                )?
+            );
+
+            found_count += 1;
+            found_idxs.push(i);
+        }
+        for i in found_idxs.iter() {
+            self.mask.remove(*i);
+        }
+
+        if required && (found_count == 0) {
+            Err(Error::MissingPositional(format!("{}...", name)))
+        } else {
+            Ok(self)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -671,7 +776,7 @@ mod handle_args {
         let test_args = string_vec!("a", "b", "c");
         assert!(test_args.len() == 3);
         Parser::from_strings(test_args)
-            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity, None)
+            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity, None, false)
                 .expect("failed to handle verbose argument(s)")
         ;
     }
@@ -680,7 +785,7 @@ mod handle_args {
     fn as_args_iter() {
         let mut verbosity: u64 = 0;
         Parser::from_args()
-            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity, None)
+            .arg('v', "verbose", "increase verbosity with each given", &mut verbosity, None, false)
                 .expect("failed to handle verbose argument(s)")
         ;
     }
@@ -698,11 +803,11 @@ mod args {
 
         let args = string_vec!("argv[0]", "-f", "foo.bar", "-s", "foo", "--long", "bar");
         Parser::from_strings(args)
-            .arg('f', "file", "file to handle", &mut file, None)
+            .arg('f', "file", "file to handle", &mut file, None, false)
                 .expect("failed to parse file argument")
-            .short_arg('s', "a short arg", &mut short, None)
+            .short_arg('s', "a short arg", &mut short, None, false)
                 .expect("failed to parse short arg")
-            .long_arg("long", "a long arg", &mut long, None)
+            .long_arg("long", "a long arg", &mut long, None, false)
                 .expect("failed to parse short arg")
         ;
 
@@ -719,11 +824,11 @@ mod args {
 
         let args = string_vec!("argv[0]", "-f=foo.bar", "-s=17", "--long", "10");
         Parser::from_strings(args)
-            .arg('f', "file", "file to handle", &mut file, None)
+            .arg('f', "file", "file to handle", &mut file, None, false)
                 .expect("failed to parse file argument")
-            .short_arg('s', "a short arg", &mut short, None)
+            .short_arg('s', "a short arg", &mut short, None, false)
                 .expect("failed to parse short arg")
-            .long_arg("long", "a long arg", &mut long, None)
+            .long_arg("long", "a long arg", &mut long, None, false)
                 .expect("failed to parse short arg")
         ;
 
@@ -835,8 +940,9 @@ mod lists {
     fn basic() {
         let mut test_list: Vec<String> = vec!();
 
-        Parser::from_strings(string_vec!("argv[0]", "-f", "foo.bar", "--file", "bar.baz", "-f", "last"))
-            .list('f', "file", "add file to list", &mut test_list, None).expect("bad list")
+        let args = string_vec!("argv[0]", "-f", "foo.bar", "--file", "bar.baz", "-f", "last");
+        Parser::from_strings(args)
+            .list('f', "file", "add file to list", &mut test_list, None, false).expect("bad list")
         ;
 
         assert!(test_list.len() == 3, "incorrect vector len {}", test_list.len());
@@ -850,7 +956,7 @@ mod lists {
         let mut test_list: Vec<String> = vec!();
 
         Parser::from_strings(string_vec!("argv[0]", "-f=foo.bar", "--file=bar.baz", "-f=last"))
-            .list('f', "file", "add file to list", &mut test_list, None).expect("bad list")
+            .list('f', "file", "add file to list", &mut test_list, None, false).expect("bad list")
         ;
 
         assert!(test_list.len() == 3, "incorrect vector len {}", test_list.len());
@@ -870,16 +976,17 @@ mod subcommands {
         let mut subs: Vec<String> = vec!();
 
         Parser::from_strings(string_vec!("argv[0]", "run", "until", "midnight", "-vvvvv"))
-            .subcommand("build", "do a build", &mut subs).expect("bad sub(build)")
+            .subcommand("build", "do a build", &mut subs, None).expect("bad sub(build)")
                 .done().expect("no done on build")
-            .subcommand("run", "run a target", &mut subs).expect("bad sub(run)")
-                .subcommand("until", "run a target until a time", &mut subs).expect("bad sub-sub(until)")
-                    .subcommand("midnight", "alias for passing in midnnight", &mut subs)
+            .subcommand("run", "run a target", &mut subs, None).expect("bad sub(run)")
+                .subcommand("until", "run a target until a time", &mut subs, None)
+                    .expect("bad sub-sub(until)")
+                    .subcommand("midnight", "alias for passing in midnnight", &mut subs, None)
                         .expect("bad sub-sub-sub(midnight)")
                         .done().expect("no done on run-until-midnight")
                     .done().expect("no done on run-until")
                 .done().expect("no done on run")
-            .subcommand("test", "test a target", &mut subs).expect("bad sub(test)")
+            .subcommand("test", "test a target", &mut subs, None).expect("bad sub(test)")
                 .done().expect("no done on test")
         ;
 
@@ -896,13 +1003,13 @@ mod subcommands {
         let mut test_file: String = "test".to_string();
 
         Parser::from_strings(string_vec!("argv[0]", "build", "-f=hahaha.txt"))
-            .subcommand("build", "do a build", &mut subs)
+            .subcommand("build", "do a build", &mut subs, None)
                 .expect("bad sub(build)")
-                .arg('f', "file", "file to build", &mut build_file, None)
+                .arg('f', "file", "file to build", &mut build_file, None, false)
                     .expect("bad build-file")
                 .done().expect("no done on build")
-            .subcommand("test", "test a target", &mut subs).expect("bad sub(test)")
-                .arg('f', "file", "file to test", &mut test_file, None)
+            .subcommand("test", "test a target", &mut subs, None).expect("bad sub(test)")
+                .arg('f', "file", "file to test", &mut test_file, None, false)
                     .expect("bad test-file")
                 .done().expect("no done on test")
         ;
@@ -912,5 +1019,107 @@ mod subcommands {
 
         assert!(build_file == "hahaha.txt", "did not set build-file: {}", build_file);
         assert!(test_file == "test", "overwrote test-file: {}", test_file);
+    }
+}
+
+
+#[cfg(test)]
+mod positionals {
+    use super::*;
+
+    #[test]
+    fn basic() {
+        let mut flags: bool = false;
+        let mut file: String = "".to_string();
+
+        Parser::from_strings(string_vec!("argv[0]", "-s", "--long", "my_file"))
+            .short_flag('s',   "check short only", &mut flags, false)
+                .expect("bad short mode")
+            .long_flag("long", "check long only",  &mut flags, false)
+                .expect("bad long mode")
+            .positional("file", "", &mut file, false)
+                .expect("could not crete positional")
+        ;
+
+        assert!(file == "my_file", "did not pick up positional");
+    }
+
+    #[test]
+    fn variadic() {
+        let mut flags: bool = false;
+        let mut files: Vec<String> = vec!();
+
+        let argv = string_vec!("argv[0]", "file1", "-s", "file2", "--long", "file3");
+        Parser::from_strings(argv)
+            .short_flag('s', "check short only", &mut flags, false)
+                .expect("bad short mode")
+            .long_flag("long", "check long only",  &mut flags, false)
+                .expect("bad long mode")
+            .positional_list("file", "", &mut files, false)
+                .expect("could not crete positional")
+        ;
+
+        assert!(files.len() == 3, "expected 3 files, got {}", files.len());
+        assert!(files[0] == "file1");
+        assert!(files[1] == "file2");
+        assert!(files[2] == "file3");
+    }
+
+    #[test]
+    fn interleaved() {
+        let mut flags: bool = false;
+        let mut args: String = "".to_string();
+        let mut count: usize = 0;
+        let mut file: String = "".to_string();
+
+        let argv = string_vec!("argv[0]",
+            "-s", "--long", "my_file", "-f=foo", "-o", "other", "-v"
+        );
+        Parser::from_strings(argv)
+            .short_flag('s',   "check short only", &mut flags, false)
+                .expect("bad short mode")
+            .long_flag("long", "check long only",  &mut flags, false)
+                .expect("bad long mode")
+            .short_arg('f', "just need an arg",  &mut args, None, false)
+                .expect("arg")
+            .short_arg('o', "just need another arg",  &mut args, None, false)
+                .expect("arg")
+            .short_count('v', "just need a count",  &mut count, 1)
+                .expect("count")
+            .positional("file", "", &mut file, false)
+                .expect("could not crete positional")
+        ;
+
+        assert!(file == "my_file", "did not pick up positional");
+    }
+
+    #[test]
+    fn missing() {
+        let mut flags: bool = false;
+        let mut file: String = "".to_string();
+
+        let mut parse = Parser::from_strings(string_vec!("argv[0]", "-s", "--long"));
+        let result = parse
+            .short_flag('s',   "check short only", &mut flags, false)
+                .expect("bad short mode")
+            .long_flag("long", "check long only",  &mut flags, false)
+                .expect("bad long mode")
+            .positional("file", "", &mut file, false)
+        ;
+
+        match &result {
+            Ok(_) => {
+                assert!(false, "did not receive missing positional error");
+            }
+            Err(e) => {
+                match e {
+                    Error::MissingPositional(_) => {}
+                    _ => {
+                        assert!(false, "got wrong error: {}", e);
+                    }
+                }
+            }
+        }
+        assert!(file.is_empty(), "did not pick up positional");
     }
 }

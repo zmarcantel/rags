@@ -11,7 +11,6 @@ using parser state to control execution flow (print_help+exit, subcommands, etc)
 
 #[derive(Debug)]
 pub struct Options {
-    file: String,
     debug: bool,
     verbosity: usize,
 
@@ -19,13 +18,16 @@ pub struct Options {
 
     build_release: bool,
     build_link: Vec<String>,
+    package: String,
 
     dry_run: bool,
+
+    initial_file: String,
+    additional_files: Vec<String>,
 }
 impl Options {
     pub fn new() -> Options {
         Options {
-            file: "default.file".to_string(),
             debug: false,
             verbosity: 0,
 
@@ -33,8 +35,12 @@ impl Options {
 
             build_release: false,
             build_link: vec!(),
+            package: "main".to_string(),
 
             dry_run: false,
+
+            initial_file: "".to_string(),
+            additional_files: vec!(),
         }
     }
 }
@@ -48,9 +54,12 @@ fn handle_args(parser: &mut rags::Parser, opts: &mut Options) -> Result<(), rags
                 &mut opts.verbosity, 1)?
             .done()?
         .subcommand("build", "build a target", &mut opts.subcmds, None)?
-            .arg('f', "file", "file to build", &mut opts.file, Some("FILE"), true)?
+            .arg('p', "package", "rename the package", &mut opts.package, Some("PKG"), true)?
             .list('l', "lib", "libraries to link", &mut opts.build_link, Some("LIB"), false)?
             .long_flag("release", "do a release build", &mut opts.build_release, false)?
+            .positional("file", "file to build", &mut opts.initial_file, true)?
+            .positional_list("files", "additional files to build",
+                &mut opts.additional_files, false)?
             .done()?
         .subcommand("clean", "clean all build artifacts", &mut opts.subcmds, None)?
             .flag('p', "print-only", "print what files would be cleaned, but do not clean",
