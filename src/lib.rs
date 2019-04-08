@@ -19,6 +19,7 @@ type MatchResult = Result<Option<FoundMatch>, Error>;
 #[cfg(test)] mod test_lists;
 #[cfg(test)] mod test_positionals;
 #[cfg(test)] mod test_subcmds;
+#[cfg(test)] mod test_unused;
 
 #[macro_export]
 macro_rules! argparse {
@@ -65,6 +66,64 @@ impl FoundMatch {
     }
 }
 
+
+#[derive(PartialEq)]
+pub enum LooksLike {
+    ShortArg,
+    LongArg,
+    Positional,
+}
+impl std::fmt::Display for LooksLike {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            LooksLike::ShortArg => {
+                write!(f, "short-arg")
+            }
+            LooksLike::LongArg => {
+                write!(f, "long-arg")
+            }
+            LooksLike::Positional => {
+                write!(f, "positional")
+            }
+        }
+    }
+}
+
+pub struct Unused {
+    pub arg: String,
+    pub looks_like: LooksLike,
+}
+impl Unused {
+    pub fn new(value: String) -> Unused {
+        let arg_0 = value.chars().nth(0).or(Some('\0')).unwrap();
+        let arg_1 = value.chars().nth(1).or(Some('\0')).unwrap();
+
+        let looks_like = if (arg_0 == '-') && (arg_1 == '-') {
+            LooksLike::LongArg
+        } else if (arg_0 == '-') && (arg_1 != '-') {
+            LooksLike::ShortArg
+        } else {
+            LooksLike::Positional
+        };
+
+        Unused {
+            arg: value,
+            looks_like: looks_like,
+        }
+    }
+}
+impl std::fmt::Display for Unused {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.looks_like {
+            LooksLike::ShortArg | LooksLike::LongArg => {
+                write!(f, "unused or unknown argument: {}", self.arg)
+            }
+            LooksLike::Positional => {
+                write!(f, "unused positional or arg-value: {}", self.arg)
+            }
+        }
+    }
+}
 
 
 pub struct Parser {
@@ -116,6 +175,29 @@ impl Parser {
     pub fn from_args() -> Parser {
         let args = env::args().collect::<Vec<String>>();
         Parser::from_strings(args)
+    }
+
+    pub fn unused(&self) -> Vec<Unused> {
+        let mut result = vec!();
+        for i in self.mask.iter() {
+            match self.run_masks.get(&i) {
+                None => {}
+                Some(mask) => {
+                    for m in mask.iter() {
+                        let s = format!("-{}", self.args[i].chars().nth(m+1).unwrap());
+                        result.push(Unused{
+                            arg: s,
+                            looks_like: LooksLike::ShortArg,
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            result.push(Unused::new(self.args[i].clone()));
+        }
+
+        result
     }
 
 
@@ -215,7 +297,7 @@ impl Parser {
             }
             None => {
                 let mut bits = bit_set::BitSet::with_capacity(arg.len());
-                for i in 0..arg.len() {
+                for i in 1..arg.len() { // skip 0, because we want to skip the leading '-'
                     bits.insert(i);
                 }
                 self.run_masks.insert(idx, bits);
@@ -254,25 +336,28 @@ impl Parser {
     fn matches_short(&mut self, idx: usize, short: char, expect_value: bool) -> MatchResult {
         if short == '\0' { return Ok(None); } // no match
 
-        if self.run_masks.contains_key(&idx) {
-            return self.handle_run(idx, short, expect_value);
-        }
-
         let arg = &self.args[idx];
         if arg.len() < 2 {
             return Ok(None);
         }
 
-        let mut chars = arg.chars();
-        let arg_0 = chars.next().or(Some('\0')).unwrap();
-
-        // expect arg[0] to be '-'  -- otherwise, looks like a positional
-        if arg_0 != '-' {
-            return Ok(None);
+        if self.run_masks.contains_key(&idx) {
+            return self.handle_run(idx, short, expect_value);
         }
 
+
+        let mut chars = arg.chars();
+        let arg_0 = chars.next().or(Some('\0')).unwrap();
         let arg_1 = chars.next().or(Some('\0')).unwrap();
         let arg_2 = chars.next().or(Some('\0')).unwrap();
+
+        // expect arg[0] to be '-'  -- otherwise, looks like a positional
+        // also expect arg[1] NOT to be '-'  -- otherwise, looks like a long
+        if arg_0 != '-' {
+            return Ok(None);
+        } else if arg_1 == '-' {
+            return Ok(None);
+        }
 
         // expect arg[1] to be the character we are looking for (so not a long)
         if arg_1 != short {
