@@ -70,7 +70,10 @@ impl Argument {
             long: long,
             desc: desc,
             label: label,
-            default: default,
+            default: match default {
+                Some(d) => { if d.is_empty() { None } else { Some(d) } }
+                None => { None }
+            },
             required: required,
         }
     }
