@@ -9,6 +9,7 @@ pub enum Error {
     ConstructionError(char, &'static str, String), // TODO: would be nice to keep the typed-error
     PositionalConstructionError(&'static str, String), // TODO: would be nice to keep the original
     SubConstructionError(&'static str, String), // TODO: would be nice to keep the typed-error
+    ValuedArgInRun(char, String), // offending short, run it was contained in
 
     NestedGroup(&'static str, &'static str), // existing, attempted
     PrinterMissingGroup(&'static str),
@@ -39,6 +40,9 @@ impl std::error::Error for Error {
             }
             Error::SubConstructionError(_, _) => {
                 "failed to construct subcommand from string"
+            }
+            Error::ValuedArgInRun(_, _) => {
+                "short-code runs only support valued-args as the last character in the run"
             }
 
             Error::NestedGroup(_, _) => {
@@ -90,6 +94,9 @@ impl std::fmt::Display for Error {
             }
             Error::SubConstructionError(name, err) => {
                 write!(f, "{} for {}: {}", self.description(), name, err)
+            }
+            Error::ValuedArgInRun(short, run) => {
+                write!(f, "{}: {} is within {}", self.description(), short, run)
             }
 
 

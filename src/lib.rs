@@ -1,6 +1,7 @@
 use std::env;
 use std::str::FromStr;
 use std::string::ToString;
+use std::collections::BTreeMap;
 
 extern crate bit_set;
 
@@ -9,6 +10,8 @@ pub use errors::*;
 
 mod printer;
 use printer::arg_string;
+
+type MatchResult = Result<Option<FoundMatch>, Error>;
 
 #[cfg(test)] mod test_args;
 #[cfg(test)] mod test_flags;
@@ -49,13 +52,15 @@ enum ValueLocation {
 
 struct FoundMatch {
     index: usize,
-    loc: ValueLocation,
+    run_count: usize,
+    value: ValueLocation,
 }
 impl FoundMatch {
-    pub fn new(idx: usize, loc: ValueLocation) -> FoundMatch {
+    pub fn new(idx: usize, runs: usize, loc: ValueLocation) -> FoundMatch {
         FoundMatch {
             index: idx,
-            loc: loc,
+            run_count: runs,
+            value: loc,
         }
     }
 }
@@ -65,6 +70,7 @@ impl FoundMatch {
 pub struct Parser {
     args: Vec<String>,
     mask: bit_set::BitSet,
+    run_masks: BTreeMap<usize, bit_set::BitSet>,
 
     walk_depth: usize,
     commit_depth: usize,
@@ -88,6 +94,7 @@ impl Parser {
         let mut p = Parser{
             args: input,
             mask: bits,
+            run_masks: BTreeMap::new(),
             walk_depth: 0,
             commit_depth: 0,
             max_depth: 0,
@@ -189,120 +196,191 @@ impl Parser {
     }
 
 
-    // returns (matches, info)
-    fn matches_short(&self, idx: usize, short: char, expect_value: bool) -> (bool, ValueLocation) {
-        if short == '\0' { return (false, ValueLocation::Unknown); }
+    fn handle_run(&mut self, idx: usize, short: char, expect_value: bool) -> MatchResult {
+        let arg = &self.args[idx];
+        if expect_value && !arg.ends_with(short) {
+            return Err(Error::ValuedArgInRun(short, arg.clone()));
+        }
+
+        let matches = arg.match_indices(short).map(|(i,_)| i).collect::<Vec<usize>>();
+        if matches.is_empty() {
+            // no matches here
+            return Ok(None);
+        }
+
+        // fetch the current mask for this run, or insert a new one
+        let runmask = match self.run_masks.get_mut(&idx) {
+            Some(mutref) => {
+                mutref
+            }
+            None => {
+                let mut bits = bit_set::BitSet::with_capacity(arg.len());
+                for i in 0..arg.len() {
+                    bits.insert(i);
+                }
+                self.run_masks.insert(idx, bits);
+                self.run_masks.get_mut(&idx).expect("failed to insert run mask")
+            }
+        };
+        if runmask.is_empty() {
+            return Ok(None);
+        }
+
+        let mut count: usize = 0;
+        for i in matches.iter() {
+            if runmask.contains(*i) == false { continue; }
+
+            runmask.remove(*i);
+            count += 1;
+        }
+        if count == 0 {
+            return Ok(None);
+        }
+
+        // when we empty a runmask, we set the "parent" index to be fully used
+        if runmask.is_empty() {
+            self.mask.remove(idx);
+        }
+
+        Ok(Some(FoundMatch::new(idx, count,
+            if expect_value {
+                ValueLocation::TakesNext
+            } else {
+                ValueLocation::Unknown
+            }
+        )))
+    }
+
+    fn matches_short(&mut self, idx: usize, short: char, expect_value: bool) -> MatchResult {
+        if short == '\0' { return Ok(None); } // no match
+
+        if self.run_masks.contains_key(&idx) {
+            return self.handle_run(idx, short, expect_value);
+        }
 
         let arg = &self.args[idx];
         if arg.len() < 2 {
-            return (false, ValueLocation::Unknown);
+            return Ok(None);
         }
 
         let mut chars = arg.chars();
         let arg_0 = chars.next().or(Some('\0')).unwrap();
-        let arg_1 = chars.next().or(Some('\0')).unwrap();
-        let arg_2 = chars.next().or(Some('\0')).unwrap();
 
         // expect arg[0] to be '-'  -- otherwise, looks like a positional
         if arg_0 != '-' {
-            return (false, ValueLocation::Unknown);
+            return Ok(None);
         }
 
-        // expect arg[1] to be the character we are looking for
+        let arg_1 = chars.next().or(Some('\0')).unwrap();
+        let arg_2 = chars.next().or(Some('\0')).unwrap();
+
+        // expect arg[1] to be the character we are looking for (so not a long)
         if arg_1 != short {
-            return (false, ValueLocation::Unknown);
+            // if it is not, but we have something that looks like a run, try that
+            if arg.len() > 2 && arg_1 != '-' && arg_2 != '=' {
+                return self.handle_run(idx, short, expect_value);
+            }
+            return Ok(None)
         }
 
         // if we got here, and the length is 2, we have the base case so just return
         if arg.len() == 2 {
             let has_next = self.mask.contains(idx + 1);
-            return (true, if expect_value && has_next {ValueLocation::TakesNext} else {ValueLocation::Unknown});
+            return if expect_value && has_next {
+                Ok(Some(FoundMatch::new(idx, 0, ValueLocation::TakesNext)))
+            } else {
+                Ok(Some(FoundMatch::new(idx, 0, ValueLocation::Unknown)))
+            };
         }
 
-        // if the arg has >2 characters, and arg[2] == '=', then we match and return the '=' offset
+        // if the arg has >2 characters, and arg[2] == '=', then we match and
+        // return the '=' offset
         if arg_2 == '=' {
             // return HasEqual regardless of expect_value because errors should be handled there
             // rather than this lower context
-            return (true, ValueLocation::HasEqual(2));
+            return Ok(Some(FoundMatch::new(idx, 0, ValueLocation::HasEqual(2))));
         }
 
-        // otherwise... no match
-        (false, ValueLocation::Unknown)
+        // we know the arg has len>=3, arg[2] != '=', so it must be a run
+        self.handle_run(idx, short, expect_value)
     }
 
-    fn matches_long(&self, idx: usize, long: &'static str, expect_value: bool) -> (bool, ValueLocation) {
-        if long.is_empty() { return (false, ValueLocation::Unknown); }
+    fn matches_long(&self, idx: usize, long: &'static str, expect_value: bool) -> MatchResult {
+        if long.is_empty() { return Ok(None); }
 
         let arg = self.args[idx].as_str();
         let end_of_arg = 2 + long.len();
 
         // not enough string to match
         if arg.len() < end_of_arg {
-            return (false, ValueLocation::Unknown);
+            return Ok(None);
         }
 
         // not a long arg
         if &arg[..2] != "--" {
-            return (false, ValueLocation::Unknown);
+            return Ok(None);
         }
 
         if &arg[2..end_of_arg] != long {
-            return (false, ValueLocation::Unknown);
+            return Ok(None);
         }
 
         // we got exactly what we were looking for, so return
         if arg.len() == end_of_arg {
             let has_next = self.mask.contains(idx + 1);
-            return (
-                true,
+            return Ok(Some(FoundMatch::new(
+                idx, 0,
                 if expect_value && has_next {
                     ValueLocation::TakesNext
                 } else {
                     ValueLocation::Unknown
                 }
-            );
+            )));
         }
 
         // we got here, so the string is longer than we expect
         // so check for a '=' trailing and return as such
         if let Some(c) = arg.chars().nth(end_of_arg) {
             if c == '=' {
-                // return HasEqual regardless of expect_value because errors should be handled there
-                // rather than this lower context
-                return (true, ValueLocation::HasEqual(end_of_arg));
+                // return HasEqual regardless of expect_value because errors should be handled
+                // there rather than this lower context
+                return Ok(Some(FoundMatch::new(idx, 0, ValueLocation::HasEqual(end_of_arg))));
             }
         }
 
         // otherwise, no match
-        (false, ValueLocation::Unknown)
+        Ok(None)
     }
 
-    fn find_match(&self, short: char, long: &'static str, expect_value: bool)
-        -> Option<FoundMatch>
+    fn find_match(&mut self, short: char, long: &'static str, expect_value: bool)
+        -> MatchResult
     {
-        for i in self.mask.iter() {
-            let (matches, arg_loc) = self.matches_short(i, short, expect_value);
-            if matches {
-                return Some(FoundMatch::new(i, arg_loc));
+        let mask_view = self.mask.iter().collect::<Vec<usize>>();
+        for i in mask_view.iter() {
+            match self.matches_short(*i, short, expect_value) {
+                Ok(Some(mat)) => {
+                    return Ok(Some(mat));
+                }
+                Ok(None) => {} // no match, so ignore
+                Err(e) => { return Err(e); }
             }
 
-            let (matches, arg_loc) = self.matches_long(i, long, expect_value);
-            if matches {
-                return Some(FoundMatch::new(i, arg_loc));
+            match self.matches_long(*i, long, expect_value) {
+                Ok(Some(mat)) => {
+                    return Ok(Some(mat));
+                }
+                Ok(None) => {} // no match, so ignore
+                Err(e) => { return Err(e); }
             }
         }
-
-        None
+        Ok(None)
     }
 
     fn find_subcommand(&self, name: &'static str) -> Option<FoundMatch> {
         for i in self.mask.iter() {
             let arg = &self.args[i];
             if arg == name {
-                return Some(FoundMatch {
-                    index: i,
-                    loc: ValueLocation::Unknown,
-                })
+                return Some(FoundMatch::new(i, 0, ValueLocation::Unknown));
             }
         }
         None
@@ -316,7 +394,7 @@ impl Parser {
     ) -> Result<(), Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        match info.loc {
+        match info.value {
             ValueLocation::Unknown => {
                 Err(Error::MissingArgValue(short, long))
             }
@@ -366,7 +444,7 @@ impl Parser {
             return Ok(self);
         }
 
-        let found_opt = self.find_match(short, long, true);
+        let found_opt = self.find_match(short, long, true)?;
         if found_opt.is_none() {
             // only required if !help
             if required  && !self.wants_help() {
@@ -431,7 +509,7 @@ impl Parser {
             }
         }
 
-        let found_opt = self.find_match(short, long, false);
+        let found_opt = self.find_match(short, long, false)?;
         if found_opt.is_none() {
             return Ok(self);
         }
@@ -439,7 +517,7 @@ impl Parser {
         let found = found_opt.unwrap();
         self.mask.remove(found.index);
 
-        match found.loc {
+        match found.value {
             ValueLocation::Unknown => {
                 *into = !invert;
             }
@@ -492,17 +570,25 @@ impl Parser {
         }
 
         loop { // loop until we get no results back
-            let found_opt = self.find_match(short, long, false);
-            if found_opt.is_none() { // TODO: required count -- does this make sense?
+            let found_opt = self.find_match(short, long, false)?;
+            if found_opt.is_none() {
                 return Ok(self);
             }
 
             let found = found_opt.unwrap();
-            self.mask.remove(found.index);
+            if found.run_count == 0 { // was not part of a run, remove eniter index
+                self.mask.remove(found.index);
+            }
 
-            match found.loc {
+            match found.value {
                 ValueLocation::Unknown => {
-                    into.add_assign(step.clone());
+                    if found.run_count == 0 {
+                        into.add_assign(step.clone());
+                    } else {
+                        for _ in 0..found.run_count {
+                            into.add_assign(step.clone());
+                        }
+                    }
                 }
                 ValueLocation::TakesNext => {
                     return Err(Error::InvalidInput(short, long, "count should not have a value"));
@@ -554,7 +640,7 @@ impl Parser {
 
         let mut found_count = 0;
         loop { // loop until we get no results back
-            let found_opt = self.find_match(short, long, true);
+            let found_opt = self.find_match(short, long, true)?;
             if found_opt.is_none() { // TODO: required count -- does this make sense?
                 // only requried when !help
                 if required && (found_count == 0) && !self.wants_help() {
@@ -567,7 +653,7 @@ impl Parser {
             let found = found_opt.unwrap();
             self.mask.remove(found.index);
 
-            let ctor_result = match found.loc {
+            let ctor_result = match found.value {
                 ValueLocation::Unknown => {
                     return Err(Error::MissingArgValue(short, long));
                 }

@@ -53,5 +53,34 @@ mod count {
 
     #[test] fn f64() { generic_count::<f64>(0f64, 1f64, 5f64); }
     #[test] fn f64_stepped() { generic_count::<f64>(0f64, 3.2f64, 16f64); }
+
+
+    #[test]
+    fn runs() {
+        let expect: usize = 10;
+        let mut count: usize = 0;
+        Parser::from_strings(string_vec!("argv[0]", "-vvvvv", "-vvvvv"))
+            .count('v', "verbose", "increase verbosity", &mut count, 1)
+                .expect("bad count parse")
+        ;
+
+        assert!(count == expect, "unexpected count value {}, wanted {}", count, expect);
+    }
+
+    #[test]
+    fn runs_interleaved() {
+        let expect: usize = 10;
+        let mut count: usize = 0;
+        let mut other: usize = 0;
+        Parser::from_strings(string_vec!("argv[0]", "-vxvxvxvxvx", "-vxvxvxvxvx"))
+            .count('v', "verbose", "increase verbosity", &mut count, 1)
+                .expect("bad count parse")
+            .count('x', "extreme", "do something different", &mut other, 1)
+                .expect("bad count parse")
+        ;
+
+        assert!(count == expect, "unexpected count value {}, wanted {}", count, expect);
+        assert!(other == expect, "unexpected other value {}, wanted {}", other, expect);
+    }
 }
 
