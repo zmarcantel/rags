@@ -811,6 +811,7 @@ impl Parser {
         }
 
         if let Some(info) = self.find_subcommand(name) {
+            self.mask.remove(info.index);
             let arg = &self.args[info.index];
             into.push(
                 T::from_str(arg)
