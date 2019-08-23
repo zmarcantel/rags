@@ -11,4 +11,4 @@ description = "rags is an easy to use argument parsing library that provides pre
 repository = "https://github.com/zmarcantel/rags"
 
 [dependencies]
-bit-set = "*"
+bit-set = "^0.5.1"
