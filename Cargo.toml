@@ -1,6 +1,6 @@
 [package]
 name = "rags-rs"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Zach Marcantel <zmarcantel@gmail.com>"]
 edition = "2018"
 license = "GPL-3.0-or-later"
@@ -9,6 +9,9 @@ keywords = ["cli", "arg", "args", "arguments", "argparse"]
 categories = ["command-line-interface"]
 description = "rags is an easy to use argument parsing library that provides pretty help-printing."
 repository = "https://github.com/zmarcantel/rags"
+
+[badges]
+travis-ci = { repository = "zmarcantel/rags" }
 
 [dependencies]
 bit-set = "^0.5.1"
