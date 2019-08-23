@@ -2,6 +2,7 @@ rags
 =========
 
 [![docs.rs/rags-rs](https://docs.rs/rags-rs/badge.svg)](https://docs.rs/rags-rs)
+[![travis-ci.org/zmarcantel/rags](https://api.travis-ci.org/zmarcantel/rags.svg?branch=master)](travis-ci.org/zmarcantel/rags)
 
 `rags` is an easy to use argument parsing library for Rust that provides pretty help-printing.
 
@@ -21,7 +22,7 @@ This crate is available from [crates.io](https://crates.io/crates/rags-rs):
 ```toml
 # Cargo.toml
 [dependencies]
-rags-rs = "^0.1.0"
+rags-rs = "^0.1.2"
 ```
 
 Your application then can create a parser, define your args, and keep on going:
