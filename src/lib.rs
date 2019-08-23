@@ -35,6 +35,8 @@
 //! such as defining descriptions as static, not returning errors from `main`, etc.
 //!
 //! ```rust
+//! extern crate rags_rs as rags;
+//!
 //! #[derive(Debug)]
 //! pub struct Options {
 //!     debug: bool,

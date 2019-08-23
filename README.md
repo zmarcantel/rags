@@ -27,7 +27,7 @@ rags-rs = "^0.1.0"
 Your application then can create a parser, define your args, and keep on going:
 
 ```rust
-extern crate rags;
+extern crate rags_rs as rags;
 
 fn main() {
     let mut parser = rags::Parser::from_args();

@@ -1,5 +1,5 @@
 [package]
-name = "rags"
+name = "rags-rs"
 version = "0.1.0"
 authors = ["Zach Marcantel <zmarcantel@gmail.com>"]
 edition = "2018"

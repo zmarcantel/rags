@@ -1,4 +1,4 @@
-extern crate rags;
+extern crate rags_rs as rags;
 use rags::argparse;
 
 static LONG_DESC: &'static str =
