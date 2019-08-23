@@ -3,6 +3,12 @@ name = "rags"
 version = "0.1.0"
 authors = ["Zach Marcantel <zmarcantel@gmail.com>"]
 edition = "2018"
+license = "GPL-3.0-or-later"
+readme = "README.md"
+keywords = ["cli", "arg", "args", "arguments", "argparse"]
+categories = ["command-line-interface"]
+description = "rags is an easy to use argument parsing library that provides pretty help-printing."
+repository = "https://github.com/zmarcantel/rags"
 
 [dependencies]
 bit-set = "*"

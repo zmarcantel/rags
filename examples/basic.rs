@@ -25,8 +25,8 @@ pub struct Options {
     initial_file: String,
     additional_files: Vec<String>,
 }
-impl Options {
-    pub fn new() -> Options {
+impl Default for Options {
+    fn default() -> Options {
         Options {
             debug: false,
             verbosity: 0,
@@ -47,6 +47,7 @@ impl Options {
 
 fn handle_args(parser: &mut rags::Parser, opts: &mut Options) -> Result<(), rags::Error> {
     parser
+        .app_desc("example using most rags features")
         .app_long_desc(LONG_DESC)
         .group("logging", "adjust logging output")?
             .flag('D', "debug", "enter debug mode", &mut opts.debug, false)?
@@ -71,7 +72,7 @@ fn handle_args(parser: &mut rags::Parser, opts: &mut Options) -> Result<(), rags
 }
 
 fn main() {
-    let mut opts = Options::new();
+    let mut opts = Options::default();
     let mut parser = argparse!();
     match handle_args(&mut parser, &mut opts) {
         Ok(_) => {}
