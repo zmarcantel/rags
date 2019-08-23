@@ -5,7 +5,7 @@ rags
 
 `rags` is an easy to use argument parsing library for Rust that provides pretty help-printing.
 
-For consistency, this README is kept lean. See the [docsumentation](https://docs.rs/rags-rs) for
+For consistency, this README is kept lean. See the [documentation](https://docs.rs/rags-rs) for
 up-to-date documentation. You may also look at the examples contained in this repo.
 
 `rags` allows defining arguments in the same tree-like manner that users and developers expect.
