@@ -67,10 +67,6 @@ impl std::error::Error for Error {
             }
         }
     }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        None
-    }
 }
 
 impl std::fmt::Display for Error {
