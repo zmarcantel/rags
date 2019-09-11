@@ -229,6 +229,12 @@ macro_rules! argparse {
 }
 
 
+enum ItemType {
+    Argument,
+    Subcommand,
+    Group,
+}
+
 /// Defines where the value (if any) associated with a given argument is located.
 #[derive(Debug)]
 enum ValueLocation {
@@ -493,15 +499,23 @@ impl Parser {
         Ok(self)
     }
 
-    fn should_ignore(&self, is_subcmd: bool) -> bool {
+    fn should_ignore(&self, item: ItemType) -> bool {
         if self.parse_done {
             return true;
         }
-        if is_subcmd {
-            self.walk_depth != (self.commit_depth + 1)
-        } else {
-            self.walk_depth != self.max_depth
+        match item {
+            ItemType::Argument => {
+                self.walk_depth != self.max_depth
+            }
+            ItemType::Subcommand => {
+                self.walk_depth != (self.commit_depth + 1)
+            }
+            ItemType::Group => {
+                // never ignore a group as there is no side-effect, and needs to be registered for the ensuing done()
+                false
+            }
         }
+
     }
 
     fn commit_next_level(&mut self) {
@@ -764,7 +778,7 @@ impl Parser {
         where <T as FromStr>::Err: std::fmt::Display
     {
 
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Argument) { return Ok(self); }
 
         // only add help if it is wanted
         if self.wants_help() {
@@ -837,7 +851,7 @@ impl Parser {
     ) -> Result<&'a mut Parser, Error>
     {
 
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Argument) { return Ok(self); }
 
         if self.wants_help() {
             self.printer.add_arg(
@@ -909,7 +923,7 @@ impl Parser {
     ) -> Result<&'a mut Parser, Error>
     {
 
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Argument) { return Ok(self); }
 
         if self.wants_help() {
             self.printer.add_arg(
@@ -986,7 +1000,7 @@ impl Parser {
         where <T as FromStr>::Err: std::fmt::Display
     {
 
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Argument) { return Ok(self); }
 
         if self.wants_help() {
             self.printer.add_arg(
@@ -1087,7 +1101,7 @@ impl Parser {
         // must move into it unconditionally
         self.walk_next_level();
 
-        if self.should_ignore(true) {
+        if self.should_ignore(ItemType::Subcommand) {
             return Ok(self);
         }
 
@@ -1136,7 +1150,7 @@ impl Parser {
             return Err(Error::NestedGroup(orig, name));
         }
 
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Group) { return Ok(self); }
 
         self.curr_group = Some(name);
         if self.wants_help() {
@@ -1170,7 +1184,7 @@ impl Parser {
     ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Argument) { return Ok(self); }
 
         if self.has_variadic {
             return Err(Error::UnorderedPositionals(name));
@@ -1225,7 +1239,7 @@ impl Parser {
     ) -> Result<&'a mut Parser, Error>
         where <T as FromStr>::Err: std::fmt::Display
     {
-        if self.should_ignore(false) { return Ok(self); }
+        if self.should_ignore(ItemType::Argument) { return Ok(self); }
 
         if self.has_variadic {
             return Err(Error::MultipleVariadic(name));
