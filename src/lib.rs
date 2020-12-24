@@ -1193,7 +1193,8 @@ impl Parser {
         if self.wants_help() {
             let def = into.to_string();
             self.printer.add_positional(printer::Positional::new(
-                name, desc, if def.is_empty() { None } else { Some(def) },
+                name, desc,
+                if def.is_empty() || required { None } else { Some(def) },
                 required, false
             ))?;
             return Ok(self);
